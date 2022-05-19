@@ -1,8 +1,5 @@
-"""
 
-Just for test draft code, not used for proposed method.
-
-"""
+# Just for test draft code, not used for proposed method.
 
 
 
@@ -16,17 +13,38 @@ from torchvision import transforms
 img = Image.open('../data/kodak24/kodim01.png')
 convert_tensor = transforms.ToTensor()
 x = convert_tensor(img)
-# print(x)
-# print(x.size()[1])
-crop1 = x[:, 0:256, 0:256]
-crop2 = x[:, 256:512, 0:256]
-crop3 = x[:, 0:256, 256:512]
-crop4 = x[:, 256:512, 256:512]
-crop5 = x[:, 0:256, 512:768]
-crop6 = x[:, 256:512, 512:768]
+
+
+# crop1 = x[:, 0:256, 0:256]
+# crop2 = x[:, 256:512, 0:256]
+# crop3 = x[:, 0:256, 256:512]
+# crop4 = x[:, 256:512, 256:512]
+# crop5 = x[:, 0:256, 512:768]
+# crop6 = x[:, 256:512, 512:768]
+
+# blocks = []
+# blocks.extend([crop1, crop2, crop3, crop4, crop5, crop6])
+
 
 blocks = []
-blocks.extend([crop1, crop2, crop3, crop4, crop5, crop6])
+x_stat = 0
+x_des = 256
+block_size = 256
+
+while (x_des <= 512):
+    y_stat = 0
+    y_des = 256
+
+    while (y_des <= 768):
+        blocks.append(x[:, x_stat:x_des, y_stat:y_des])
+        y_stat = y_des
+        y_des += block_size
+
+    x_stat = x_des
+    x_des += block_size
+
+
+
 #print(blocks)
 i = 0
 for b in blocks:
@@ -40,11 +58,11 @@ for b in blocks:
     
 # 합치기
 
-row1 = torch.cat([crop1, crop3, crop5], dim=2)
-row2 = torch.cat([crop2, crop4, crop6], dim=2)
-col = torch.cat([row1, row2], dim=1)
-col = transforms.functional.to_pil_image(col)
-col.save('full.jpg')
+# row1 = torch.cat([crop1, crop3, crop5], dim=2)
+# row2 = torch.cat([crop2, crop4, crop6], dim=2)
+# col = torch.cat([row1, row2], dim=1)
+# col = transforms.functional.to_pil_image(col)
+# col.save('full.jpg')
 
 
 # crop1 = transforms.functional.to_pil_image(crop1)
