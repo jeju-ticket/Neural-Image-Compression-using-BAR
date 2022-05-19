@@ -198,9 +198,10 @@ class AverageMeter:
         self.avg = self.sum / self.count
 
 
-def comrpess_and_decompress(model, test_dataloader, device, blockSize):
+def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
     psnr = AverageMeter()
     bpp = AverageMeter()
+
 
     with torch.no_grad():
         for i_, x in enumerate(test_dataloader):
@@ -209,7 +210,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize):
             x = x.to(device)
             #print(x.size())
 
-            
+            # Image -> Blocks =================================================================
             if(x.size()[2] > x.size()[3]):
                 x = torch.transpose(x, 2, 3)
                 #print("Transposed : ", x.size())
@@ -220,66 +221,156 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize):
             x_stat = 0
             x_des = block_size
             
-
             while (x_des <= x.size()[2]):
                 y_stat = 0
                 y_des = block_size
 
                 while (y_des <= x.size()[3]):
-                    blocks.append(x[:, :, x_stat:x_des, y_stat:y_des])
+                    blocks.append(x[:, :, x_stat:x_des, y_stat:y_des]) # blocks.size == 6 when 2N == 256
                     y_stat = y_des
                     y_des += block_size
 
                 x_stat = x_des
                 x_des += block_size
 
-            # crop1 = x[:, :, 0:256, 0:256]
-            # crop2 = x[:, :, 256:512, 0:256]
-            # crop3 = x[:, :, 0:256, 256:512]
-            # crop4 = x[:, :, 256:512, 256:512]
-            # crop5 = x[:, :, 0:256, 512:768]
-            # crop6 = x[:, :, 256:512, 512:768]
-               
-            # blocks = []
 
-            # blocks.extend([crop1, crop2, crop3, crop4, crop5, crop6])
-            blocks_hat = []
-            
-            b_bpp_y = 0
-            b_bpp_z = 0
-            for b in blocks:
-                # compress
-                compressed = model.compress(b)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+            # Mode Decision Part ===============================================================
+            added_2nx2n = [] # 모드별로 선택된 2nx2n 블록 담는 list
+            for target in blocks:
+                target_block = target
+                """
+                    @ Mode 1
+                    @ mini blocks -> NNIC -> a block
+                """
+                # Mode 1 ---------------------------------------------------------------------------
+                ## 1. 미니 블록으로 쪼개기            
+                mini_blocks = []
+                mini_block_size = block_size // 2
+                
+                m_stat = 0
+                m_des = mini_block_size
+                
+                while (m_des <= block_size):
+                    
+                    n_stat = 0
+                    n_des = mini_block_size
+                    
+                    while(n_des <= block_size): 
+                        mini_blocks.append(target_block[:, :, m_stat:m_des, n_stat:n_des])
+                        n_stat = n_des
+                        n_des += mini_block_size
+
+                    m_stat = m_des
+                    m_des += mini_block_size
+
+                # i = 0
+                # for b in mini_blocks:
+                    
+                #     #print("b is \n", b)
+                #     #print("num is ", i)
+                #     name = str(i) + '.jpg'
+                #     b = torch.squeeze(b)
+                #     item = transforms.functional.to_pil_image(b)
+                #     i += 1
+
+                ## 2. mini blocks를 NNIC에 넣기
+                mini_blocks_hat = []
+                b_bpp_y = 0
+                b_bpp_z = 0
+                for b in mini_blocks:
+                    # compress
+                    compressed = model.compress(b)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+                    strings = compressed['strings']
+                    shape = compressed['shape']
+
+                    # decompress
+                    decompressed = model.decompress(strings, shape)
+                    b_hat = decompressed['x_hat'].clamp_(0, 1)
+                    mini_blocks_hat.append(b_hat)
+
+                    b_bpp_y += (len(strings[0][0])) * 8
+                    b_bpp_z += (len(strings[1][0])) * 8
+
+                ## 3. 복원된 mini blocks를 2N x 2N으로 복원하기
+                row1 = torch.cat([mini_blocks_hat[0], mini_blocks_hat[1]], dim=3)
+                row2 = torch.cat([mini_blocks_hat[2], mini_blocks_hat[3]], dim=3)
+                block_hat = torch.cat([row1, row2], dim=2)
+
+                #### (사진 잘 나오는지 확인 하려고)            
+                # photo = torch.squeeze(x_hat)
+                # photo = transforms.functional.to_pil_image(photo)
+                # photo.save('photo.jpg')
+
+                ## 4. 하나의 2N x 2N 블록에 대해 bpp, psnr 계산
+                # print('b_bpp_y : ', b_bpp_y, 'b_bpp_y:', b_bpp_z)
+                bpp_y = b_bpp_y / (target_block.shape[2] * target_block.shape[3])
+                # print(bpp_y)
+                bpp_z = b_bpp_z / (target_block.shape[2] * target_block.shape[3])
+                # print(bpp_z)
+                mode1_bpp_ = bpp_y + bpp_z
+
+                mode1_mse_ = (block_hat - target_block).pow(2).mean()
+                mode1_psnr_ = 10 * (torch.log(1 * 1 / mode1_mse_) / math.log(10))
+
+
+
+
+                """
+                    @ Mode 2
+                    @ Downsample -> NNIC -> Upsample
+                """
+                # # Mode 2 -------------------------------------------------------
+                downsampled_block = torch.nn.functional.interpolate(target_block, size=[block_size // 2, block_size // 2], mode='bicubic')
+                
+                #compress
+                compressed = model.compress(downsampled_block)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
                 strings = compressed['strings']
                 shape = compressed['shape']
 
                 # decompress
                 decompressed = model.decompress(strings, shape)
                 b_hat = decompressed['x_hat'].clamp_(0, 1)
-                blocks_hat.append(b_hat)
+
+                upsampled_block = torch.nn.functional.interpolate(b_hat, size=[block_size, block_size], mode='bicubic')
 
                 b_bpp_y += (len(strings[0][0])) * 8
                 b_bpp_z += (len(strings[1][0])) * 8
 
+                bpp_y = b_bpp_y / (target_block.shape[2] * target_block.shape[3])
+                # print(bpp_y)
+                bpp_z = b_bpp_z / (target_block.shape[2] * target_block.shape[3])
+                # print(bpp_z)
+                mode2_bpp_ = bpp_y + bpp_z
 
-            row1 = torch.cat([blocks_hat[0], blocks_hat[1], blocks_hat[2]], dim=3)
-            row2 = torch.cat([blocks_hat[3], blocks_hat[4], blocks_hat[5]], dim=3)
+                mode2_mse_ = (upsampled_block - target_block).pow(2).mean()
+                mode2_psnr_ = 10 * (torch.log(1 * 1 / mode2_mse_) / math.log(10))
+
+                """
+                    @ Mode Comparison
+                """
+                # Mode 비교 -------------------------------------------------------------------
+                mode1_cost = lmbda * 255 ** 2 * mode1_mse_ + mode1_bpp_
+                mode2_cost = lmbda * 255 ** 2 * mode2_mse_ + mode2_bpp_
+
+                if(mode1_cost < mode2_cost):
+                    bpp.update(mode1_bpp_)
+                    psnr.update(mode1_psnr_)
+                    added_2nx2n.append(block_hat)
+                
+                else:
+                    bpp.update(mode2_bpp_)
+                    psnr.update(mode2_psnr_)
+                    added_2nx2n.append(upsampled_block)
+
+            row1 = torch.cat([added_2nx2n[0], added_2nx2n[1], added_2nx2n[2]], dim=3)
+            row2 = torch.cat([added_2nx2n[3], added_2nx2n[4], added_2nx2n[5]], dim=3)
             x_hat = torch.cat([row1, row2], dim=2)
-
-            #### 사진 잘 나오는지 확인 하려고            
             photo = torch.squeeze(x_hat)
             photo = transforms.functional.to_pil_image(photo)
-            photo.save('photo.jpg')
+            photo.save('photo.jpg')   
+         
+   
 
-            bpp_y = b_bpp_y / (x.shape[2] * x.shape[3])
-            bpp_z = b_bpp_z / (x.shape[2] * x.shape[3])
-            bpp_ = bpp_y + bpp_z
-
-            mse_ = (x_hat - x).pow(2).mean()
-            psnr_ = 10 * (torch.log(1 * 1 / mse_) / math.log(10))
-
-            bpp.update(bpp_)
-            psnr.update(psnr_)
 
     print(
     f"\tTest PSNR: {psnr.avg:.3f} |"
@@ -293,11 +384,22 @@ def main(argv):
     if args.seed is not None:
         torch.manual_seed(args.seed)
         random.seed(args.seed)
-
+    
+    qualities_to_lambda = {
+        1: 0.0018,
+        2: 0.0035,
+        3: 0.0067,
+        4: 0.0130,
+        5: 0.0250,
+        6: 0.0483,
+        7: 0.0932,
+        8: 0.1800
+    }
+    
     device = "cpu"
     for q in range(1,9):
         model = load_model(args.model, metric="mse", quality=q, pretrained=True).to(device).eval()
-
+        lmbda = qualities_to_lambda[q]
         if args.checkpoint:  # load from previous checkpoint
             print("Loading", args.checkpoint)
             checkpoint = torch.load(args.checkpoint, map_location=device)
@@ -305,7 +407,7 @@ def main(argv):
 
         test_dataloader = build_dataset(args)
         print(f"Quality : {q} ")
-        comrpess_and_decompress(model, test_dataloader, device, args.block)
+        comrpess_and_decompress(model, test_dataloader, device, args.block, lmbda)
 
 
 if __name__ == "__main__":

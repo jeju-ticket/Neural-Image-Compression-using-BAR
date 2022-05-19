@@ -2,6 +2,7 @@ token
 data/
 .vscode/
 test.py
+photo.jpg
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
