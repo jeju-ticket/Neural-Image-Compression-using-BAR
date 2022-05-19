@@ -1,6 +1,6 @@
 from compressai.zoo.pretrained import load_pretrained
 from compressai.zoo.image import cfgs, model_urls
-#from custom_model import CustomMeanScaleHyperprior
+from custom_model import CustomMeanScaleHyperprior
 from compressai.models import (
     Cheng2020Anchor,
     Cheng2020Attention,
@@ -13,7 +13,7 @@ from torch.hub import load_state_dict_from_url
 model_architectures = {
     "bmshj2018-factorized": FactorizedPrior,
     "bmshj2018-hyperprior": ScaleHyperprior,
-    #"mbt2018-mean": CustomMeanScaleHyperprior,  # changed
+    "mbt2018-mean": CustomMeanScaleHyperprior,  # changed
     "mbt2018": JointAutoregressiveHierarchicalPriors,
     "cheng2020-anchor": Cheng2020Anchor,
     "cheng2020-attn": Cheng2020Attention,
