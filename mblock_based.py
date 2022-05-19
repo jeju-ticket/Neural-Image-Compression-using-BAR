@@ -211,20 +211,37 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize):
 
             
             if(x.size()[2] > x.size()[3]):
-                x = torch.transpose(x,2,3)
+                x = torch.transpose(x, 2, 3)
                 #print("Transposed : ", x.size())
                 isTransposed = True
 
-            crop1 = x[:, :, 0:256, 0:256]
-            crop2 = x[:, :, 256:512, 0:256]
-            crop3 = x[:, :, 0:256, 256:512]
-            crop4 = x[:, :, 256:512, 256:512]
-            crop5 = x[:, :, 0:256, 512:768]
-            crop6 = x[:, :, 256:512, 512:768]
-               
             blocks = []
+            x_stat = 0
+            x_des = 256
+            block_size = 256
 
-            blocks.extend([crop1, crop2, crop3, crop4, crop5, crop6])
+            while (x_des <= 512):
+                y_stat = 0
+                y_des = 256
+
+                while (y_des <= 768):
+                    blocks.append(x[:, :, x_stat:x_des, y_stat:y_des])
+                    y_stat = y_des
+                    y_des += block_size
+
+                x_stat = x_des
+                x_des += block_size
+
+            # crop1 = x[:, :, 0:256, 0:256]
+            # crop2 = x[:, :, 256:512, 0:256]
+            # crop3 = x[:, :, 0:256, 256:512]
+            # crop4 = x[:, :, 256:512, 256:512]
+            # crop5 = x[:, :, 0:256, 512:768]
+            # crop6 = x[:, :, 256:512, 512:768]
+               
+            # blocks = []
+
+            # blocks.extend([crop1, crop2, crop3, crop4, crop5, crop6])
             blocks_hat = []
             
             b_bpp_y = 0
@@ -244,14 +261,14 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize):
                 b_bpp_z += (len(strings[1][0])) * 8
 
 
-            row1 = torch.cat([blocks_hat[0], blocks_hat[2], blocks_hat[4]], dim=3)
-            row2 = torch.cat([blocks_hat[1], blocks_hat[3], blocks_hat[5]], dim=3)
+            row1 = torch.cat([blocks_hat[0], blocks_hat[1], blocks_hat[2]], dim=3)
+            row2 = torch.cat([blocks_hat[3], blocks_hat[4], blocks_hat[5]], dim=3)
             x_hat = torch.cat([row1, row2], dim=2)
 
             #### 사진 잘 나오는지 확인 하려고            
-            # photo = torch.squeeze(x_hat)
-            # photo = transforms.functional.to_pil_image(photo)
-            # photo.save('photo.jpg')
+            photo = torch.squeeze(x_hat)
+            photo = transforms.functional.to_pil_image(photo)
+            photo.save('photo.jpg')
 
             bpp_y = b_bpp_y / (x.shape[2] * x.shape[3])
             bpp_z = b_bpp_z / (x.shape[2] * x.shape[3])
