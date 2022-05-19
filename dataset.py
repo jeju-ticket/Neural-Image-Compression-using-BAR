@@ -7,13 +7,14 @@ import random
 from torchvision.transforms import transforms, functional
 
 
+
 class ImageFolderVimeo(Dataset):
     def __init__(self, root, transform=None, split="train"):
         from tqdm import tqdm
         self.mode = split
         self.transform = transform
         self.samples = []
-        split_dir = Path('./data/vimeo_septuplet/sequences')
+        split_dir = Path(root) / Path('vimeo_septuplet/sequences')
         for sub_f in tqdm(split_dir.iterdir()):
             if sub_f.is_dir():
                 for sub_sub_f in Path(sub_f).iterdir():

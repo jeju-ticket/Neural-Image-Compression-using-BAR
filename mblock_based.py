@@ -36,7 +36,7 @@ import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from compressai.zoo import image_models
-from dataset import ImageFolderVimeo
+from dataset import Kodak24Dataset
 from load_model import load_model
 
 
@@ -57,9 +57,9 @@ def parse_args(argv):
         choices=image_models.keys(),
         help="Model architecture (default: %(default)s)",
     )
-    parser.add_argument(
-        "-q", "--quality", type=int, default=0, help="quality of the model"
-    )
+    # parser.add_argument(
+    #     "-q", "--quality", type=int, default=0, help="quality of the model"
+    # )
 
     parser.add_argument(
         "-d", "--dataset", type=str, default='../data', help="Training dataset"
@@ -148,6 +148,13 @@ def parse_args(argv):
         type=float,
         help="gradient clipping max norm (default: %(default)s",
     )
+
+    parser.add_argument(
+        "--block",
+        type = int,
+        default = 256,
+        help = "Size of 2Nx2N block - based on 2N"
+    )
     parser.add_argument("--checkpoint", type=str, help="Path to a checkpoint")
     args = parser.parse_args(argv)
     return args
@@ -155,24 +162,24 @@ def parse_args(argv):
 
 def build_dataset(args):
     # Warning, the order of the transform composition should be kept.
-    vimeo_transform = transforms.Compose(
+    kodak_transform = transforms.Compose(
         [transforms.ToTensor()]
     )
 
-    vimeo_dataset = ImageFolderVimeo(
+    kodak_dataset = Kodak24Dataset(
         args.dataset,
-        transform=vimeo_transform,
+        transform=kodak_transform,
     )
 
-    vimeo_dataloader = DataLoader(
-        vimeo_dataset,
+    kodak_dataloader = DataLoader(
+        kodak_dataset,
         batch_size=args.test_batch_size,
         num_workers=args.num_workers,
         shuffle=False,
         pin_memory=True,
     )
 
-    return vimeo_dataloader
+    return kodak_dataloader
 
 
 class AverageMeter:
@@ -191,37 +198,76 @@ class AverageMeter:
         self.avg = self.sum / self.count
 
 
-def comrpess_and_decompress(model, test_dataloader, device):
+def comrpess_and_decompress(model, test_dataloader, device, blockSize):
     psnr = AverageMeter()
     bpp = AverageMeter()
 
     with torch.no_grad():
         for i_, x in enumerate(test_dataloader):
+            
+            isTransposed = False
             x = x.to(device)
+            #print(x.size())
 
-            # compress
-            compressed = model.compress(x)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
-            strings = compressed['strings']
-            shape = compressed['shape']
+            
+            if(x.size()[2] > x.size()[3]):
+                x = torch.transpose(x,2,3)
+                #print("Transposed : ", x.size())
+                isTransposed = True
 
-            # decompress
-            decompressed = model.decompress(strings, shape)
-            x_hat = decompressed['x_hat'].clamp_(0, 1)
+            crop1 = x[:, :, 0:256, 0:256]
+            crop2 = x[:, :, 256:512, 0:256]
+            crop3 = x[:, :, 0:256, 256:512]
+            crop4 = x[:, :, 256:512, 256:512]
+            crop5 = x[:, :, 0:256, 512:768]
+            crop6 = x[:, :, 256:512, 512:768]
+               
+            blocks = []
 
-            bpp_y = (len(strings[0][0])) * 8 / (x.shape[2] * x.shape[3])
-            bpp_z = (len(strings[1][0])) * 8 / (x.shape[2] * x.shape[3])
+            blocks.extend([crop1, crop2, crop3, crop4, crop5, crop6])
+            blocks_hat = []
+            
+            b_bpp_y = 0
+            b_bpp_z = 0
+            for b in blocks:
+                # compress
+                compressed = model.compress(b)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+                strings = compressed['strings']
+                shape = compressed['shape']
+
+                # decompress
+                decompressed = model.decompress(strings, shape)
+                b_hat = decompressed['x_hat'].clamp_(0, 1)
+                blocks_hat.append(b_hat)
+
+                b_bpp_y += (len(strings[0][0])) * 8
+                b_bpp_z += (len(strings[1][0])) * 8
+
+
+            row1 = torch.cat([blocks_hat[0], blocks_hat[2], blocks_hat[4]], dim=3)
+            row2 = torch.cat([blocks_hat[1], blocks_hat[3], blocks_hat[5]], dim=3)
+            x_hat = torch.cat([row1, row2], dim=2)
+
+            #### 사진 잘 나오는지 확인 하려고            
+            # photo = torch.squeeze(x_hat)
+            # photo = transforms.functional.to_pil_image(photo)
+            # photo.save('photo.jpg')
+
+            bpp_y = b_bpp_y / (x.shape[2] * x.shape[3])
+            bpp_z = b_bpp_z / (x.shape[2] * x.shape[3])
             bpp_ = bpp_y + bpp_z
 
             mse_ = (x_hat - x).pow(2).mean()
             psnr_ = 10 * (torch.log(1 * 1 / mse_) / math.log(10))
-            #print(psnr_)
+
             bpp.update(bpp_)
             psnr.update(psnr_)
 
     print(
-        f"\tTest PSNR: {psnr.avg:.3f} |"
-        f"\tTest BPP: {bpp.avg:.3f} |"
+    f"\tTest PSNR: {psnr.avg:.3f} |"
+    f"\tTest BPP: {bpp.avg:.3f} |"
     )
+
 
 def main(argv):
     args = parse_args(argv)
@@ -231,16 +277,17 @@ def main(argv):
         random.seed(args.seed)
 
     device = "cpu"
-    model = load_model(args.model, metric="mse", quality=args.quality, pretrained=True).to(device).eval()
+    for q in range(1,9):
+        model = load_model(args.model, metric="mse", quality=q, pretrained=True).to(device).eval()
 
+        if args.checkpoint:  # load from previous checkpoint
+            print("Loading", args.checkpoint)
+            checkpoint = torch.load(args.checkpoint, map_location=device)
+            model.load_state_dict(checkpoint["state_dict"])
 
-    if args.checkpoint:  # load from previous checkpoint
-        print("Loading", args.checkpoint)
-        checkpoint = torch.load(args.checkpoint, map_location=device)
-        model.load_state_dict(checkpoint["state_dict"])
-
-    test_dataloader = build_dataset(args)
-    comrpess_and_decompress(model, test_dataloader, device)
+        test_dataloader = build_dataset(args)
+        print(f"Quality : {q} ")
+        comrpess_and_decompress(model, test_dataloader, device, args.block)
 
 
 if __name__ == "__main__":
