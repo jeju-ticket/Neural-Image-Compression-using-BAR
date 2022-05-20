@@ -233,16 +233,71 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize):
                 x_stat = x_des
                 x_des += block_size
 
-            # crop1 = x[:, :, 0:256, 0:256]
-            # crop2 = x[:, :, 256:512, 0:256]
-            # crop3 = x[:, :, 0:256, 256:512]
-            # crop4 = x[:, :, 256:512, 256:512]
-            # crop5 = x[:, :, 0:256, 512:768]
-            # crop6 = x[:, :, 256:512, 512:768]
-               
-            # blocks = []
+            for target in blocks:
+                target_block = target
+                """
+                    @ Mode 1
+                    @ mini blocks -> NNIC -> a block
+                """
+                # Mode 1 ---------------------------------------------------------------------------
+                ## 1. 미니 블록으로 쪼개기            
+                mini_blocks = []
+                mini_block_size = block_size // 2
+                
+                m_stat = 0
+                m_des = mini_block_size
+                
+                while (m_des <= block_size):
+                    
+                    n_stat = 0
+                    n_des = mini_block_size
+                    
+                    while(n_des <= block_size): 
+                        mini_blocks.append(target_block[:, :, m_stat:m_des, n_stat:n_des])
+                        n_stat = n_des
+                        n_des += mini_block_size
 
-            # blocks.extend([crop1, crop2, crop3, crop4, crop5, crop6])
+                    m_stat = m_des
+                    m_des += mini_block_size
+
+                ## 2. mini blocks를 NNIC에 넣기
+                mini_blocks_hat = []
+                b_bpp_y = 0
+                b_bpp_z = 0
+                for b in mini_blocks:
+                    # compress
+                    compressed = model.compress(b)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
+                    strings = compressed['strings']
+                    shape = compressed['shape']
+
+                    # decompress
+                    decompressed = model.decompress(strings, shape)
+                    b_hat = decompressed['x_hat'].clamp_(0, 1)
+                    mini_blocks_hat.append(b_hat)
+
+                    b_bpp_y += (len(strings[0][0])) * 8
+                    b_bpp_z += (len(strings[1][0])) * 8
+
+                ## 3. 복원된 mini blocks를 2N x 2N으로 복원하기
+                row1 = torch.cat([mini_blocks_hat[0], mini_blocks_hat[1]], dim=3)
+                row2 = torch.cat([mini_blocks_hat[2], mini_blocks_hat[3]], dim=3)
+                block_hat = torch.cat([row1, row2], dim=2)
+
+                ## 4. 하나의 2N x 2N 블록에 대해 bpp, psnr 계산
+                # print('b_bpp_y : ', b_bpp_y, 'b_bpp_y:', b_bpp_z)
+                bpp_y = b_bpp_y / (target_block.shape[2] * target_block.shape[3])
+                # print(bpp_y)
+                bpp_z = b_bpp_z / (target_block.shape[2] * target_block.shape[3])
+                # print(bpp_z)
+                bpp_ = bpp_y + bpp_z
+
+                mse_ = (block_hat - target_block).pow(2).mean()
+                psnr_ = 10 * (torch.log(1 * 1 / mse_) / math.log(10))
+
+                bpp.update(bpp_)
+                psnr.update(psnr_)
+            
+            """
             blocks_hat = []
             
             b_bpp_y = 0
@@ -280,6 +335,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize):
 
             bpp.update(bpp_)
             psnr.update(psnr_)
+            """
 
     print(
     f"\tTest PSNR: {psnr.avg:.3f} |"
