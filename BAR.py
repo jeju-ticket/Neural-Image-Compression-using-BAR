@@ -311,6 +311,8 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
 
                 mode1_mse_ = (block_hat - target_block).pow(2).mean()
                 mode1_psnr_ = 10 * (torch.log(1 * 1 / mode1_mse_) / math.log(10))
+                print("mode1_mse_ : ", mode1_mse_)
+                print("mode1_bpp_ : ", mode1_bpp_)
 
 
 
@@ -344,6 +346,8 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
 
                 mode2_mse_ = (upsampled_block - target_block).pow(2).mean()
                 mode2_psnr_ = 10 * (torch.log(1 * 1 / mode2_mse_) / math.log(10))
+                print("mode2_mse_ : ", mode2_mse_)
+                print("mode2_bpp_ : ", mode2_bpp_)
 
                 """
                     @ Mode Comparison
@@ -351,13 +355,16 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 # Mode 비교 -------------------------------------------------------------------
                 mode1_cost = lmbda * 255 ** 2 * mode1_mse_ + mode1_bpp_
                 mode2_cost = lmbda * 255 ** 2 * mode2_mse_ + mode2_bpp_
+                
 
                 if(mode1_cost < mode2_cost):
+                    print("mode1 is better")
                     bpp.update(mode1_bpp_)
                     psnr.update(mode1_psnr_)
                     added_2nx2n.append(block_hat)
                 
                 else:
+                    print("mode2 is better")
                     bpp.update(mode2_bpp_)
                     psnr.update(mode2_psnr_)
                     added_2nx2n.append(upsampled_block)
