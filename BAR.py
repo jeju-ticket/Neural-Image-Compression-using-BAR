@@ -204,8 +204,9 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
 
 
     with torch.no_grad():
+        picture_num = 1
         for i_, x in enumerate(test_dataloader):
-            
+            print("************************ #", picture_num, " PICTURE BLOCKS ************************")
             isTransposed = False
             x = x.to(device)
             #print(x.size())
@@ -213,7 +214,6 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
             # Image -> Blocks =================================================================
             if(x.size()[2] > x.size()[3]):
                 x = torch.transpose(x, 2, 3)
-                #print("Transposed : ", x.size())
                 isTransposed = True
 
             blocks = []
@@ -236,6 +236,10 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
 
             # Mode Decision Part ===============================================================
             added_2nx2n = [] # 모드별로 선택된 2nx2n 블록 담는 list
+            mode1_bpp_ = 0
+            mode1_mse_ = 0
+            mode1_psnr_ = 0
+            block_number = 1  # 몇번째 블록인지 표시하기 위해서
             for target in blocks:
                 target_block = target
                 """
@@ -243,7 +247,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                     @ mini blocks -> NNIC -> a block
                 """
                 # Mode 1 ---------------------------------------------------------------------------
-                ## 1. 미니 블록으로 쪼개기            
+                ## 1.1. 미니 블록으로 쪼개기            
                 mini_blocks = []
                 mini_block_size = block_size // 2
                 
@@ -263,17 +267,8 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                     m_stat = m_des
                     m_des += mini_block_size
 
-                # i = 0
-                # for b in mini_blocks:
-                    
-                #     #print("b is \n", b)
-                #     #print("num is ", i)
-                #     name = str(i) + '.jpg'
-                #     b = torch.squeeze(b)
-                #     item = transforms.functional.to_pil_image(b)
-                #     i += 1
 
-                ## 2. mini blocks를 NNIC에 넣기
+                ## 1.2. mini blocks를 NNIC에 넣기
                 mini_blocks_hat = []
                 b_bpp_y = 0
                 b_bpp_z = 0
@@ -286,12 +281,24 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                     # decompress
                     decompressed = model.decompress(strings, shape)
                     b_hat = decompressed['x_hat'].clamp_(0, 1)
-                    mini_blocks_hat.append(b_hat)
+                    mini_blocks_hat.append(b_hat) # 복원된 NxN 블록을 mini_blocks_hat 리스트에 넣음 (나중에 2Nx2N으로 복원하기 위해)
 
+
+                ## 1.3. 하나의 N x N 블록에 대해 bpp, psnr 계산
+                # print('b_bpp_y : ', b_bpp_y, 'b_bpp_y:', b_bpp_z)
                     b_bpp_y += (len(strings[0][0])) * 8
                     b_bpp_z += (len(strings[1][0])) * 8
 
-                ## 3. 복원된 mini blocks를 2N x 2N으로 복원하기
+                    bpp_y = b_bpp_y / (b.shape[2] * b.shape[3])
+                    bpp_z = b_bpp_z / (b.shape[2] * b.shape[3])
+                    mode1_bpp_ += bpp_y + bpp_z
+
+
+                    mode1_mse_ += (b_hat - b).pow(2).mean()
+                    mode1_psnr_ += 10 * (torch.log(1 * 1 / mode1_mse_) / math.log(10))
+
+
+                ## 1.4. 복원된 mini blocks를 2N x 2N으로 복원하기
                 row1 = torch.cat([mini_blocks_hat[0], mini_blocks_hat[1]], dim=3)
                 row2 = torch.cat([mini_blocks_hat[2], mini_blocks_hat[3]], dim=3)
                 block_hat = torch.cat([row1, row2], dim=2)
@@ -301,8 +308,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 # photo = transforms.functional.to_pil_image(photo)
                 # photo.save('photo.jpg')
 
-                ## 4. 하나의 2N x 2N 블록에 대해 bpp, psnr 계산
-                # print('b_bpp_y : ', b_bpp_y, 'b_bpp_y:', b_bpp_z)
+
                 bpp_y = b_bpp_y / (target_block.shape[2] * target_block.shape[3])
                 # print(bpp_y)
                 bpp_z = b_bpp_z / (target_block.shape[2] * target_block.shape[3])
@@ -311,9 +317,8 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
 
                 mode1_mse_ = (block_hat - target_block).pow(2).mean()
                 mode1_psnr_ = 10 * (torch.log(1 * 1 / mode1_mse_) / math.log(10))
-                print("mode1_mse_ : ", mode1_mse_)
-                print("mode1_bpp_ : ", mode1_bpp_)
-
+                print("@@ MODE 1 @@")
+                print("mse_ : ", mode1_mse_, "bpp_ : ", mode1_bpp_, "PSNR_ : ", mode1_psnr_)
 
 
 
@@ -346,8 +351,8 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
 
                 mode2_mse_ = (upsampled_block - target_block).pow(2).mean()
                 mode2_psnr_ = 10 * (torch.log(1 * 1 / mode2_mse_) / math.log(10))
-                print("mode2_mse_ : ", mode2_mse_)
-                print("mode2_bpp_ : ", mode2_bpp_)
+                print("@@ MODE 2 @@")
+                print("mse_ : ", mode2_mse_, "bpp_ : ", mode2_bpp_, "PSNR_ : ", mode2_psnr_)
 
                 """
                     @ Mode Comparison
@@ -356,7 +361,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 mode1_cost = lmbda * 255 ** 2 * mode1_mse_ + mode1_bpp_
                 mode2_cost = lmbda * 255 ** 2 * mode2_mse_ + mode2_bpp_
                 
-
+                print("#", block_number, " Block")
                 if(mode1_cost < mode2_cost):
                     print("mode1 is better")
                     bpp.update(mode1_bpp_)
@@ -369,12 +374,16 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                     psnr.update(mode2_psnr_)
                     added_2nx2n.append(upsampled_block)
 
+                block_number += 1
+                print("================================")
+
             row1 = torch.cat([added_2nx2n[0], added_2nx2n[1], added_2nx2n[2]], dim=3)
             row2 = torch.cat([added_2nx2n[3], added_2nx2n[4], added_2nx2n[5]], dim=3)
             x_hat = torch.cat([row1, row2], dim=2)
             photo = torch.squeeze(x_hat)
             photo = transforms.functional.to_pil_image(photo)
-            photo.save('photo.jpg')   
+            photo.save('photo.jpg')
+            picture_num += 1   
          
    
 
