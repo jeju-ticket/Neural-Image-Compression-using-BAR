@@ -38,7 +38,9 @@ from torchvision import transforms
 from compressai.zoo import image_models
 from dataset import Kodak24Dataset
 from load_model import load_model
+import os
 
+image_hat_path = "./decompressed_image/"
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
@@ -273,6 +275,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 b_bpp_y = 0
                 b_bpp_z = 0
                 for b in mini_blocks:
+
                     # compress
                     compressed = model.compress(b)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
                     strings = compressed['strings']
@@ -284,18 +287,9 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                     mini_blocks_hat.append(b_hat) # 복원된 NxN 블록을 mini_blocks_hat 리스트에 넣음 (나중에 2Nx2N으로 복원하기 위해)
 
 
-                ## 1.3. 하나의 N x N 블록에 대해 bpp, psnr 계산
-                # print('b_bpp_y : ', b_bpp_y, 'b_bpp_y:', b_bpp_z)
-                    b_bpp_y += (len(strings[0][0])) * 8
-                    b_bpp_z += (len(strings[1][0])) * 8
-
-                    bpp_y = b_bpp_y / (b.shape[2] * b.shape[3])
-                    bpp_z = b_bpp_z / (b.shape[2] * b.shape[3])
-                    mode1_bpp_ += bpp_y + bpp_z
-
-
-                    mode1_mse_ += (b_hat - b).pow(2).mean()
-                    mode1_psnr_ += 10 * (torch.log(1 * 1 / mode1_mse_) / math.log(10))
+                    ## 1.3. 하나의 N x N 블록에 대해 bitrate 계산
+                    b_bpp_y += (len(strings[0][0])) * 8 # bitrate
+                    b_bpp_z += (len(strings[1][0])) * 8 # bitrate
 
 
                 ## 1.4. 복원된 mini blocks를 2N x 2N으로 복원하기
@@ -303,22 +297,22 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 row2 = torch.cat([mini_blocks_hat[2], mini_blocks_hat[3]], dim=3)
                 block_hat = torch.cat([row1, row2], dim=2)
 
+                bpp_y = b_bpp_y / (target_block.shape[2] * target_block.shape[3]) # bpp 계산
+                bpp_z = b_bpp_z / (target_block.shape[2] * target_block.shape[3]) # bpp 계산
+                mode1_bpp_ += bpp_y + bpp_z
+
+
+                mode1_mse_ = (block_hat - target_block).pow(2).mean()
+                mode1_psnr_ = 10 * (torch.log(1 * 1 / mode1_mse_) / math.log(10))
+
                 #### (사진 잘 나오는지 확인 하려고)            
                 # photo = torch.squeeze(x_hat)
                 # photo = transforms.functional.to_pil_image(photo)
                 # photo.save('photo.jpg')
 
-
-                bpp_y = b_bpp_y / (target_block.shape[2] * target_block.shape[3])
-                # print(bpp_y)
-                bpp_z = b_bpp_z / (target_block.shape[2] * target_block.shape[3])
-                # print(bpp_z)
-                mode1_bpp_ = bpp_y + bpp_z
-
-                mode1_mse_ = (block_hat - target_block).pow(2).mean()
-                mode1_psnr_ = 10 * (torch.log(1 * 1 / mode1_mse_) / math.log(10))
-                print("@@ MODE 1 @@")
-                print("mse_ : ", mode1_mse_, "bpp_ : ", mode1_bpp_, "PSNR_ : ", mode1_psnr_)
+               
+                #print("@@ MODE 1 @@")
+                #print("mse_ : ", mode1_mse_, "bpp_ : ", mode1_bpp_, "PSNR_ : ", mode1_psnr_)
 
 
 
@@ -327,7 +321,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                     @ Downsample -> NNIC -> Upsample
                 """
                 # # Mode 2 -------------------------------------------------------
-                downsampled_block = torch.nn.functional.interpolate(target_block, size=[block_size // 2, block_size // 2], mode='bicubic')
+                downsampled_block = torch.nn.functional.interpolate(target_block, size=[block_size // 2, block_size // 2], mode='bicubic').clamp_(0, 1)
                 
                 #compress
                 compressed = model.compress(downsampled_block)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
@@ -336,23 +330,20 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
 
                 # decompress
                 decompressed = model.decompress(strings, shape)
-                b_hat = decompressed['x_hat'].clamp_(0, 1)
+                b_hat = decompressed['x_hat']
 
-                upsampled_block = torch.nn.functional.interpolate(b_hat, size=[block_size, block_size], mode='bicubic')
+                upsampled_block = torch.nn.functional.interpolate(b_hat, size=[block_size, block_size], mode='bicubic').clamp_(0, 1)
 
-                b_bpp_y += (len(strings[0][0])) * 8
-                b_bpp_z += (len(strings[1][0])) * 8
-
-                bpp_y = b_bpp_y / (target_block.shape[2] * target_block.shape[3])
+                bpp_y = (len(strings[0][0])) * 8 / (target_block.shape[2] * target_block.shape[3])
                 # print(bpp_y)
-                bpp_z = b_bpp_z / (target_block.shape[2] * target_block.shape[3])
+                bpp_z = (len(strings[1][0])) * 8 / (target_block.shape[2] * target_block.shape[3])
                 # print(bpp_z)
                 mode2_bpp_ = bpp_y + bpp_z
 
                 mode2_mse_ = (upsampled_block - target_block).pow(2).mean()
                 mode2_psnr_ = 10 * (torch.log(1 * 1 / mode2_mse_) / math.log(10))
-                print("@@ MODE 2 @@")
-                print("mse_ : ", mode2_mse_, "bpp_ : ", mode2_bpp_, "PSNR_ : ", mode2_psnr_)
+                #print("@@ MODE 2 @@")
+                #print("mse_ : ", mode2_mse_, "bpp_ : ", mode2_bpp_, "PSNR_ : ", mode2_psnr_)
 
                 """
                     @ Mode Comparison
@@ -375,14 +366,14 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                     added_2nx2n.append(upsampled_block)
 
                 block_number += 1
-                print("================================")
+                #print("================================")
 
             row1 = torch.cat([added_2nx2n[0], added_2nx2n[1], added_2nx2n[2]], dim=3)
             row2 = torch.cat([added_2nx2n[3], added_2nx2n[4], added_2nx2n[5]], dim=3)
             x_hat = torch.cat([row1, row2], dim=2)
             photo = torch.squeeze(x_hat)
             photo = transforms.functional.to_pil_image(photo)
-            photo.save('photo.jpg')
+            photo.save(image_hat_path + str(lmbda) + "_" +str(picture_num) + ".jpg")
             picture_num += 1   
          
    
