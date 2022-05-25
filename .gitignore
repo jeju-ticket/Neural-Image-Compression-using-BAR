@@ -6,6 +6,7 @@ photo.jpg
 decompressed_image/
 result/
 blockbased_image/
+decompressed_image_128/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
