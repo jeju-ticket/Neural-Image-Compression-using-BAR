@@ -301,7 +301,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, quality):
 
                 bpp_y = b_bpp_y / (target_block.shape[2] * target_block.shape[3]) # bpp 계산
                 bpp_z = b_bpp_z / (target_block.shape[2] * target_block.shape[3]) # bpp 계산
-                mode1_bpp_ += bpp_y + bpp_z
+                mode1_bpp_ = bpp_y + bpp_z
 
 
                 mode1_mse_ = (block_hat - target_block).pow(2).mean()
@@ -339,7 +339,7 @@ def main(argv):
         torch.manual_seed(args.seed)
         random.seed(args.seed)
 
-    device = "cpu"
+    device = "cuda"
     for q in range(1,9):
         model = load_model(args.model, metric="mse", quality=q, pretrained=True).to(device).eval()
 
