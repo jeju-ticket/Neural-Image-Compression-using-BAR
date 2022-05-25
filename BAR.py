@@ -204,6 +204,17 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
     psnr = AverageMeter()
     bpp = AverageMeter()
 
+    lmbda_to_quality = {
+        0.0018 :1,
+        0.0035 :2,
+        0.0067 :3,
+        0.0130 :4,
+        0.0250 :5,
+        0.0483 :6,
+        0.0932 :7,
+        0.1800 :8
+    }
+
 
     with torch.no_grad():
         picture_num = 1
@@ -373,7 +384,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
             x_hat = torch.cat([row1, row2], dim=2)
             photo = torch.squeeze(x_hat)
             photo = transforms.functional.to_pil_image(photo)
-            photo.save(image_hat_path + str(lmbda) + "_" +str(picture_num) + ".jpg")
+            photo.save(image_hat_path + str(lmbda_to_quality[lmbda]) + "/" +str(picture_num) + ".jpg")
             picture_num += 1   
          
    
@@ -383,6 +394,15 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
     f"\tTest PSNR: {psnr.avg:.3f} |"
     f"\tTest BPP: {bpp.avg:.3f} |"
     )
+
+    with open("./result/RateDistortion.txt", 'a') as f:
+        f.write(
+        f"\tLmbda: {lmbda_to_quality[lmbda]} |"
+        f"\tPSNR: {psnr.avg:.3f} |"
+        f"\tBPP: {bpp.avg:.3f} | \n")
+
+
+    
 
 
 def main(argv):
