@@ -39,6 +39,7 @@ from compressai.zoo import image_models
 from dataset import Kodak24Dataset
 from load_model import load_model
 
+image_hat_path = "./blockbased_image/"
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
@@ -198,11 +199,14 @@ class AverageMeter:
         self.avg = self.sum / self.count
 
 
-def comrpess_and_decompress(model, test_dataloader, device, blockSize):
+def comrpess_and_decompress(model, test_dataloader, device, blockSize, quality):
     psnr = AverageMeter()
     bpp = AverageMeter()
 
+
+
     with torch.no_grad():
+        picture_num = 1 
         for i_, x in enumerate(test_dataloader):
             
             isTransposed = False
@@ -233,6 +237,12 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize):
                 x_stat = x_des
                 x_des += block_size
 
+            
+            block_hats = [] # 복원된 2nx2n 블록 담는 list
+            mode1_bpp_ = 0
+            mode1_mse_ = 0
+            mode1_psnr_ = 0
+            block_number = 1  # 몇번째 블록인지 표시하기 위해서
             for target in blocks:
                 target_block = target
                 """
@@ -240,7 +250,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize):
                     @ mini blocks -> NNIC -> a block
                 """
                 # Mode 1 ---------------------------------------------------------------------------
-                ## 1. 미니 블록으로 쪼개기            
+                ## 1.1. 미니 블록으로 쪼개기            
                 mini_blocks = []
                 mini_block_size = block_size // 2
                 
@@ -260,11 +270,13 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize):
                     m_stat = m_des
                     m_des += mini_block_size
 
-                ## 2. mini blocks를 NNIC에 넣기
+
+                ## 1.2. mini blocks를 NNIC에 넣기
                 mini_blocks_hat = []
                 b_bpp_y = 0
                 b_bpp_z = 0
                 for b in mini_blocks:
+
                     # compress
                     compressed = model.compress(b)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
                     strings = compressed['strings']
@@ -273,74 +285,51 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize):
                     # decompress
                     decompressed = model.decompress(strings, shape)
                     b_hat = decompressed['x_hat'].clamp_(0, 1)
-                    mini_blocks_hat.append(b_hat)
+                    mini_blocks_hat.append(b_hat) # 복원된 NxN 블록을 mini_blocks_hat 리스트에 넣음 (나중에 2Nx2N으로 복원하기 위해)
 
-                    b_bpp_y += (len(strings[0][0])) * 8
-                    b_bpp_z += (len(strings[1][0])) * 8
 
-                ## 3. 복원된 mini blocks를 2N x 2N으로 복원하기
+                    ## 1.3. 하나의 N x N 블록에 대해 bitrate 계산
+                    b_bpp_y += (len(strings[0][0])) * 8 # bitrate
+                    b_bpp_z += (len(strings[1][0])) * 8 # bitrate
+
+
+                ## 1.4. 복원된 mini blocks를 2N x 2N으로 복원하기
                 row1 = torch.cat([mini_blocks_hat[0], mini_blocks_hat[1]], dim=3)
                 row2 = torch.cat([mini_blocks_hat[2], mini_blocks_hat[3]], dim=3)
                 block_hat = torch.cat([row1, row2], dim=2)
+                block_hats.append(block_hat)
 
-                ## 4. 하나의 2N x 2N 블록에 대해 bpp, psnr 계산
-                # print('b_bpp_y : ', b_bpp_y, 'b_bpp_y:', b_bpp_z)
-                bpp_y = b_bpp_y / (target_block.shape[2] * target_block.shape[3])
-                # print(bpp_y)
-                bpp_z = b_bpp_z / (target_block.shape[2] * target_block.shape[3])
-                # print(bpp_z)
-                bpp_ = bpp_y + bpp_z
-
-                mse_ = (block_hat - target_block).pow(2).mean()
-                psnr_ = 10 * (torch.log(1 * 1 / mse_) / math.log(10))
-
-                bpp.update(bpp_)
-                psnr.update(psnr_)
-            
-            """
-            blocks_hat = []
-            
-            b_bpp_y = 0
-            b_bpp_z = 0
-            for b in blocks:
-                # compress
-                compressed = model.compress(b)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
-                strings = compressed['strings']
-                shape = compressed['shape']
-
-                # decompress
-                decompressed = model.decompress(strings, shape)
-                b_hat = decompressed['x_hat'].clamp_(0, 1)
-                blocks_hat.append(b_hat)
-
-                b_bpp_y += (len(strings[0][0])) * 8
-                b_bpp_z += (len(strings[1][0])) * 8
+                bpp_y = b_bpp_y / (target_block.shape[2] * target_block.shape[3]) # bpp 계산
+                bpp_z = b_bpp_z / (target_block.shape[2] * target_block.shape[3]) # bpp 계산
+                mode1_bpp_ += bpp_y + bpp_z
 
 
-            row1 = torch.cat([blocks_hat[0], blocks_hat[1], blocks_hat[2]], dim=3)
-            row2 = torch.cat([blocks_hat[3], blocks_hat[4], blocks_hat[5]], dim=3)
+                mode1_mse_ = (block_hat - target_block).pow(2).mean()
+                mode1_psnr_ = 10 * (torch.log(1 * 1 / mode1_mse_) / math.log(10))
+
+                bpp.update(mode1_bpp_)
+                psnr.update(mode1_psnr_)
+
+            row1 = torch.cat([block_hats[0], block_hats[1], block_hats[2]], dim=3)
+            row2 = torch.cat([block_hats[3], block_hats[4], block_hats[5]], dim=3)
             x_hat = torch.cat([row1, row2], dim=2)
-
-            #### 사진 잘 나오는지 확인 하려고            
             photo = torch.squeeze(x_hat)
             photo = transforms.functional.to_pil_image(photo)
-            photo.save('photo.jpg')
-
-            bpp_y = b_bpp_y / (x.shape[2] * x.shape[3])
-            bpp_z = b_bpp_z / (x.shape[2] * x.shape[3])
-            bpp_ = bpp_y + bpp_z
-
-            mse_ = (x_hat - x).pow(2).mean()
-            psnr_ = 10 * (torch.log(1 * 1 / mse_) / math.log(10))
-
-            bpp.update(bpp_)
-            psnr.update(psnr_)
-            """
+            photo.save(image_hat_path + str(quality) + "/" +str(picture_num) + ".jpg")
+            picture_num += 1 
+        
 
     print(
     f"\tTest PSNR: {psnr.avg:.3f} |"
     f"\tTest BPP: {bpp.avg:.3f} |"
     )
+
+    with open("./result/blockBased_RD.txt", 'a') as f:
+        f.write(
+        f"\tQuality: {quality} |"
+        f"\tPSNR: {psnr.avg:.3f} |"
+        f"\tBPP: {bpp.avg:.3f} | \n")
+
 
 
 def main(argv):
@@ -361,7 +350,7 @@ def main(argv):
 
         test_dataloader = build_dataset(args)
         print(f"Quality : {q} ")
-        comrpess_and_decompress(model, test_dataloader, device, args.block)
+        comrpess_and_decompress(model, test_dataloader, device, args.block, q)
 
 
 if __name__ == "__main__":
