@@ -3,10 +3,10 @@ data/
 .vscode/
 test.py
 photo.jpg
-result/
-128_compressed/
-256_compressed/
-blockbased_image/
+VER2/
+VER3/
+block-based/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
