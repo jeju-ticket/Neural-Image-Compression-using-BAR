@@ -39,7 +39,7 @@ from compressai.zoo import image_models
 from dataset import Kodak24Dataset
 from load_model import load_model
 
-image_hat_path = "./blockbased_image/"
+
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(description="Example training script.")
@@ -200,6 +200,24 @@ class AverageMeter:
 
 
 def comrpess_and_decompress(model, test_dataloader, device, blockSize, quality):
+
+    lmbda_to_quality = {
+        0.0018 :1,
+        0.0035 :2,
+        0.0067 :3,
+        0.0130 :4,
+        0.0250 :5,
+        0.0483 :6,
+        0.0932 :7,
+        0.1800 :8
+    }
+
+    if(blockSize == 128):
+        image_hat_path = "./block-based/128/"
+    
+    else:
+        image_hat_path = "./block-based/256/"
+
     psnr = AverageMeter()
     bpp = AverageMeter()
 
@@ -310,13 +328,25 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, quality):
                 bpp.update(mode1_bpp_)
                 psnr.update(mode1_psnr_)
 
-            row1 = torch.cat([block_hats[0], block_hats[1], block_hats[2]], dim=3)
-            row2 = torch.cat([block_hats[3], block_hats[4], block_hats[5]], dim=3)
-            x_hat = torch.cat([row1, row2], dim=2)
-            photo = torch.squeeze(x_hat)
-            photo = transforms.functional.to_pil_image(photo)
-            photo.save(image_hat_path + str(quality) + "/" +str(picture_num) + ".jpg")
-            picture_num += 1 
+            if(blockSize == 256):
+                row1 = torch.cat([block_hats[0], block_hats[1], block_hats[2]], dim=3)
+                row2 = torch.cat([block_hats[3], block_hats[4], block_hats[5]], dim=3)
+                x_hat = torch.cat([row1, row2], dim=2)
+                photo = torch.squeeze(x_hat)
+                photo = transforms.functional.to_pil_image(photo)
+                photo.save(image_hat_path + str(quality) + "/" +str(picture_num) + ".jpg")
+                picture_num += 1   
+            
+            else:
+                row1 = torch.cat([block_hats[0], block_hats[1], block_hats[2], block_hats[3], block_hats[4], block_hats[5]], dim=3)
+                row2 = torch.cat([block_hats[6], block_hats[7], block_hats[8], block_hats[9], block_hats[10], block_hats[11]], dim=3)
+                row3 = torch.cat([block_hats[12], block_hats[13], block_hats[14], block_hats[15], block_hats[16], block_hats[17]], dim=3)
+                row4 = torch.cat([block_hats[18], block_hats[19], block_hats[20], block_hats[21], block_hats[22], block_hats[23]], dim=3)
+                x_hat = torch.cat([row1, row2, row3, row4], dim=2)
+                photo = torch.squeeze(x_hat)
+                photo = transforms.functional.to_pil_image(photo)
+                photo.save(image_hat_path + str(quality) + "/" +str(picture_num) + ".jpg")
+                picture_num += 1 
         
 
     print(
@@ -324,11 +354,21 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, quality):
     f"\tTest BPP: {bpp.avg:.3f} |"
     )
 
-    with open("./result/blockBased_RD.txt", 'a') as f:
-        f.write(
-        f"\tQuality: {quality} |"
-        f"\tPSNR: {psnr.avg:.3f} |"
-        f"\tBPP: {bpp.avg:.3f} | \n")
+    if(block_size == 128):
+        with open("./block-based/128_result.txt", 'a') as f:
+            f.write(
+            f"\tQuality: {quality} |"
+            f"\tPSNR: {psnr.avg:.3f} |"
+            f"\tBPP: {bpp.avg:.3f} | \n")
+    
+    elif(block_size == 256):
+        with open("./block-based/256_result.txt", 'a') as f:
+            f.write(
+            f"\tQuality: {quality} |"
+            f"\tPSNR: {psnr.avg:.3f} |"
+            f"\tBPP: {bpp.avg:.3f} | \n")
+    else:
+        sys.exit("Invalid Block")
 
 
 
