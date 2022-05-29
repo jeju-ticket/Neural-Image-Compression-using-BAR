@@ -143,13 +143,7 @@ def parse_args(argv):
     parser.add_argument(
         "--seed", type=float, default=123, help="Set random seed for reproducibility"
     )
-    parser.add_argument(
-        "--clip_max_norm",
-        default=1.0,
-        type=float,
-        help="gradient clipping max norm (default: %(default)s",
-    )
-
+    
     parser.add_argument(
         "--block",
         type = int,
@@ -215,10 +209,14 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
     }
 
     if(blockSize == 256):
-        image_hat_path = "./256_compressed/"
+        image_hat_path = "./256_mode_ver/"
     
+    elif(blockSize == 128):
+        image_hat_path = "./128_mode_ver/" 
+   
     else:
-        image_hat_path = "./128_compressed/"
+        sys.exit("Invalid block size")   
+        
 
     with torch.no_grad():
         picture_num = 1
@@ -236,19 +234,19 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
             blocks = []
             block_size = blockSize
             x_stat = 0
-            x_des = block_size
+            x_des = blockSize
             
             while (x_des <= x.size()[2]):
                 y_stat = 0
-                y_des = block_size
+                y_des = blockSize
 
                 while (y_des <= x.size()[3]):
                     blocks.append(x[:, :, x_stat:x_des, y_stat:y_des]) # blocks.size == 6 when 2N == 256
                     y_stat = y_des
-                    y_des += block_size
+                    y_des += blockSize
 
                 x_stat = x_des
-                x_des += block_size
+                x_des += blockSize
 
 
             # Mode Decision Part ===============================================================
@@ -266,23 +264,23 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 # Mode 1 ---------------------------------------------------------------------------
                 ## 1.1. 미니 블록으로 쪼개기            
                 mini_blocks = []
-                mini_block_size = block_size // 2
+                mini_blockSize = blockSize // 2
                 
                 m_stat = 0
-                m_des = mini_block_size
+                m_des = mini_blockSize
                 
-                while (m_des <= block_size):
+                while (m_des <= blockSize):
                     
                     n_stat = 0
-                    n_des = mini_block_size
+                    n_des = mini_blockSize
                     
-                    while(n_des <= block_size): 
+                    while(n_des <= blockSize): 
                         mini_blocks.append(target_block[:, :, m_stat:m_des, n_stat:n_des])
                         n_stat = n_des
-                        n_des += mini_block_size
+                        n_des += mini_blockSize
 
                     m_stat = m_des
-                    m_des += mini_block_size
+                    m_des += mini_blockSize
 
 
                 ## 1.2. mini blocks를 NNIC에 넣기
@@ -320,23 +318,12 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 mode1_mse_ = (block_hat - target_block).pow(2).mean()
                 mode1_psnr_ = 10 * (torch.log(1 * 1 / mode1_mse_) / math.log(10))
 
-                #### (사진 잘 나오는지 확인 하려고)            
-                # photo = torch.squeeze(x_hat)
-                # photo = transforms.functional.to_pil_image(photo)
-                # photo.save('photo.jpg')
-
-               
-                #print("@@ MODE 1 @@")
-                #print("mse_ : ", mode1_mse_, "bpp_ : ", mode1_bpp_, "PSNR_ : ", mode1_psnr_)
-
-
-
                 """
                     @ Mode 2
                     @ Downsample -> NNIC -> Upsample
                 """
                 # # Mode 2 -------------------------------------------------------
-                downsampled_block = torch.nn.functional.interpolate(target_block, size=[block_size // 2, block_size // 2], mode='bicubic').clamp_(0, 1)
+                downsampled_block = torch.nn.functional.interpolate(target_block, size=[blockSize // 2, blockSize // 2], mode='bicubic').clamp_(0, 1)
                 
                 #compress
                 compressed = model.compress(downsampled_block)  # {"strings": [y_strings, z_strings], "shape": z.size()[-2:]}
@@ -347,7 +334,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 decompressed = model.decompress(strings, shape)
                 b_hat = decompressed['x_hat']
 
-                upsampled_block = torch.nn.functional.interpolate(b_hat, size=[block_size, block_size], mode='bicubic').clamp_(0, 1)
+                upsampled_block = torch.nn.functional.interpolate(b_hat, size=[blockSize, blockSize], mode='bicubic').clamp_(0, 1)
 
                 bpp_y = ((len(strings[0][0])) * 8 + 1) / (target_block.shape[2] * target_block.shape[3])
                 # print(bpp_y)
@@ -383,7 +370,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 block_number += 1
                 #print("================================")
 
-            if(block_size == 256):
+            if(blockSize == 256):
                 row1 = torch.cat([block_hats[0], block_hats[1], block_hats[2]], dim=3)
                 row2 = torch.cat([block_hats[3], block_hats[4], block_hats[5]], dim=3)
                 x_hat = torch.cat([row1, row2], dim=2)
@@ -392,7 +379,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 photo.save(image_hat_path + str(lmbda_to_quality[lmbda]) + "/" +str(picture_num) + ".jpg")
                 picture_num += 1   
             
-            else:
+            elif(blockSize == 128):
                 row1 = torch.cat([block_hats[0], block_hats[1], block_hats[2], block_hats[3], block_hats[4], block_hats[5]], dim=3)
                 row2 = torch.cat([block_hats[6], block_hats[7], block_hats[8], block_hats[9], block_hats[10], block_hats[11]], dim=3)
                 row3 = torch.cat([block_hats[12], block_hats[13], block_hats[14], block_hats[15], block_hats[16], block_hats[17]], dim=3)
@@ -402,7 +389,9 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 photo = transforms.functional.to_pil_image(photo)
                 photo.save(image_hat_path + str(lmbda_to_quality[lmbda]) + "/" +str(picture_num) + ".jpg")
                 picture_num += 1 
-         
+            
+            else:
+                sys.exit("Invalid Block Size")   
    
 
 
@@ -411,26 +400,30 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
     f"\tTest BPP: {bpp.avg:.3f} |"
     )
 
-    if(block_size == 256) :
+    if(blockSize == 256) :
         with open("./result/256_RD.txt", 'a') as f:
             f.write(
             f"\tLmbda: {lmbda_to_quality[lmbda]} |"
             f"\tPSNR: {psnr.avg:.3f} |"
             f"\tBPP: {bpp.avg:.3f} | \n")
 
-    else:
+    elif(blockSize == 128): 
         with open("./result/128_RD.txt", 'a') as f:
             f.write(
             f"\tLmbda: {lmbda_to_quality[lmbda]} |"
             f"\tPSNR: {psnr.avg:.3f} |"
             f"\tBPP: {bpp.avg:.3f} | \n")
 
+    else:
+        sys.exit("Invalid Block Size")  
+        
 
     
 
 
 def main(argv):
     args = parse_args(argv)
+    torch.backends.cudnn.deterministic = True
 
     if args.seed is not None:
         torch.manual_seed(args.seed)
