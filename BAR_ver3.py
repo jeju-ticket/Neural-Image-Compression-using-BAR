@@ -312,9 +312,10 @@ def comrpess_and_decompress(model_mode1, model_mode2, test_dataloader, device, b
                 row2 = torch.cat([mini_blocks_hat[2], mini_blocks_hat[3]], dim=3)
                 block_hat = torch.cat([row1, row2], dim=2)
 
-                bpp_y = (b_bpp_y + 1) / (target_block.shape[2] * target_block.shape[3]) # bpp 계산
-                bpp_z = (b_bpp_z + 1) / (target_block.shape[2] * target_block.shape[3]) # bpp 계산
-                mode1_bpp_ = bpp_y + bpp_z
+               
+                bits_total = b_bpp_y + b_bpp_z + 1   # 1 == a mode signaling bit per 2Nx2N block
+
+                mode1_bpp_ = bits_total / (target_block.shape[2] * target_block.shape[3])
 
 
                 mode1_mse_ = (block_hat - target_block).pow(2).mean()
@@ -338,11 +339,15 @@ def comrpess_and_decompress(model_mode1, model_mode2, test_dataloader, device, b
 
                 upsampled_block = torch.nn.functional.interpolate(b_hat, size=[blockSize, blockSize], mode='bicubic').clamp_(0, 1)
 
-                bpp_y = ((len(strings[0][0])) * 8 + 1) / (target_block.shape[2] * target_block.shape[3])
+                
+                bpp_y = ((len(strings[0][0])) * 8)
                 # print(bpp_y)
-                bpp_z = ((len(strings[1][0])) * 8 + 1) / (target_block.shape[2] * target_block.shape[3])
+                bpp_z = ((len(strings[1][0])) * 8)
                 # print(bpp_z)
-                mode2_bpp_ = bpp_y + bpp_z
+
+                bits_total = bpp_y + bpp_z + 1   # 1 == mode signaling a bit per 2Nx2N block
+
+                mode2_bpp_ = bits_total / (target_block.shape[2] * target_block.shape[3])
 
                 mode2_mse_ = (upsampled_block - target_block).pow(2).mean()
                 mode2_psnr_ = 10 * (torch.log(1 * 1 / mode2_mse_) / math.log(10))
@@ -392,40 +397,6 @@ def comrpess_and_decompress(model_mode1, model_mode2, test_dataloader, device, b
                 photo.save(image_hat_path + str(lmbda_to_quality[lmbda]) + "/" +str(picture_num) + ".jpg")
                 picture_num += 1 
 
-            elif(blockSize == 64):
-                row1 = torch.cat([block_hats[0], block_hats[1], block_hats[2], block_hats[3], block_hats[4], block_hats[5],
-                                    block_hats[6], block_hats[7], block_hats[8], block_hats[9], block_hats[10], block_hats[11]], dim=3)
-
-                row2 = torch.cat([block_hats[12], block_hats[13], block_hats[14], block_hats[15], block_hats[16], block_hats[17],
-                                    block_hats[18], block_hats[19], block_hats[20], block_hats[21], block_hats[22], block_hats[23]], dim=3)
-
-                row3 = torch.cat([block_hats[24], block_hats[25], block_hats[26], block_hats[27], block_hats[28], block_hats[29],
-                                    block_hats[30], block_hats[31], block_hats[32], block_hats[33], block_hats[34], block_hats[35]], dim=3)
-
-                row4 = torch.cat([block_hats[36], block_hats[37], block_hats[38], block_hats[39], block_hats[40], block_hats[41],
-                                    block_hats[42], block_hats[43], block_hats[44], block_hats[45], block_hats[46], block_hats[47]], dim=3)
-
-                row5 = torch.cat([block_hats[48], block_hats[49], block_hats[50], block_hats[51], block_hats[52], block_hats[53],
-                                    block_hats[54], block_hats[55], block_hats[56], block_hats[57], block_hats[58], block_hats[59]], dim=3)
-
-                row6 = torch.cat([block_hats[60], block_hats[61], block_hats[62], block_hats[63], block_hats[64], block_hats[65],
-                                    block_hats[66], block_hats[67], block_hats[68], block_hats[69], block_hats[70], block_hats[71]], dim=3)
-
-                row7 = torch.cat([block_hats[72], block_hats[73], block_hats[74], block_hats[75], block_hats[76], block_hats[77],
-                                    block_hats[78], block_hats[79], block_hats[80], block_hats[81], block_hats[82], block_hats[83]], dim=3)
-
-                row8 = torch.cat([block_hats[84], block_hats[85], block_hats[86], block_hats[87], block_hats[88], block_hats[89],
-                                    block_hats[90], block_hats[91], block_hats[92], block_hats[93], block_hats[94], block_hats[95]], dim=3)
-
-                x_hat = torch.cat([row1, row2, row3, row4, row5, row6, row7, row8], dim = 2)
-                photo = torch.squeeze(x_hat)
-                photo = transforms.functional.to_pil_image(photo)
-                photo.save(image_hat_path + str(lmbda_to_quality[lmbda]) + "/" +str(picture_num) + ".jpg")
-                picture_num += 1 
-
-
-            
-            
             else:
                 sys.exit("Invalid Block Size")   
    

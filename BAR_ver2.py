@@ -310,9 +310,11 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 row2 = torch.cat([mini_blocks_hat[2], mini_blocks_hat[3]], dim=3)
                 block_hat = torch.cat([row1, row2], dim=2)
 
-                bpp_y = (b_bpp_y + 1) / (target_block.shape[2] * target_block.shape[3]) # bpp 계산
-                bpp_z = (b_bpp_z + 1) / (target_block.shape[2] * target_block.shape[3]) # bpp 계산
-                mode1_bpp_ = bpp_y + bpp_z
+                bits_total = b_bpp_y + b_bpp_z + 1   # 1 == a mode signaling bit per 2Nx2N block
+
+                mode1_bpp_ = bits_total / (target_block.shape[2] * target_block.shape[3])
+
+
 
 
                 mode1_mse_ = (block_hat - target_block).pow(2).mean()
@@ -335,13 +337,15 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 b_hat = decompressed['x_hat']
 
                 upsampled_block = torch.nn.functional.interpolate(b_hat, size=[blockSize, blockSize], mode='bicubic').clamp_(0, 1)
-
-                bpp_y = ((len(strings[0][0])) * 8 + 1) / (target_block.shape[2] * target_block.shape[3])
+                
+                bpp_y = ((len(strings[0][0])) * 8)
                 # print(bpp_y)
-                bpp_z = ((len(strings[1][0])) * 8 + 1) / (target_block.shape[2] * target_block.shape[3])
+                bpp_z = ((len(strings[1][0])) * 8)
                 # print(bpp_z)
-                mode2_bpp_ = bpp_y + bpp_z
 
+                bits_total = bpp_y + bpp_z + 1   # 1 == mode signaling a bit per 2Nx2N block
+
+                mode2_bpp_ = bits_total / (target_block.shape[2] * target_block.shape[3])
                 mode2_mse_ = (upsampled_block - target_block).pow(2).mean()
                 mode2_psnr_ = 10 * (torch.log(1 * 1 / mode2_mse_) / math.log(10))
                 #print("@@ MODE 2 @@")
