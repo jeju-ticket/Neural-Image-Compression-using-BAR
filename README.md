@@ -1,7 +1,7 @@
 # Neural-Image-Compression-using-BAR
-Neural Image Compression using Block based Adaptive Resizing
-There is no need for GPU to train.
-This is draft README.md, it might have insufficient information.
+
+There is no need for GPU to train.<br>
+This is draft README.md, it might have insufficient information.<br>
 If you want to get more info, please open the [issues](https://github.com/jeju-ticket/Neural-Image-Compression-using-BAR/issues).
 
 
