@@ -106,15 +106,7 @@ def parse_args(argv):
         default=4,
         help="Dataloaders threads (default: %(default)s)",
     )
-    # parser.add_argument(
-    #     "--lambda",
-    #     dest="lmbda",
-    #     type=float,
-    #     default=1e-2,
-    #     # quality   :     1        2        3        4        5        6       7       8
-    #     # lambda    :  0.0018   0.0035   0.0067   0.0130   0.0250   0.0483  0.0932   0.1800
-    #     help="Bit-rate distortion parameter (default: %(default)s)",
-    # )
+
     parser.add_argument(
         "--batch-size", type=int, default=16, help="Batch size (default: %(default)s)"
     )
@@ -348,8 +340,7 @@ def comrpess_and_decompress(model, test_dataloader, device, blockSize, lmbda):
                 mode2_bpp_ = bits_total / (target_block.shape[2] * target_block.shape[3])
                 mode2_mse_ = (upsampled_block - target_block).pow(2).mean()
                 mode2_psnr_ = 10 * (torch.log(1 * 1 / mode2_mse_) / math.log(10))
-                #print("@@ MODE 2 @@")
-                #print("mse_ : ", mode2_mse_, "bpp_ : ", mode2_bpp_, "PSNR_ : ", mode2_psnr_)
+
 
                 """
                     @ Mode Comparison
